@@ -18,8 +18,7 @@ def inv():
 @pytest.fixture(scope="module")
 def db(tmp_path_factory, inv):
     out = tmp_path_factory.mktemp("data")
-    P.write_parquet(inv, out / "raw")
-    P.run_models(out / "oss.duckdb", out / "raw")
+    P.build(out)                                       # pipeline lengkap: model SQL juga membaca tabel alarm
     con = duckdb.connect(str(out / "oss.duckdb"), read_only=True)
     yield con
     con.close()

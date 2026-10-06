@@ -36,9 +36,21 @@ def run_models(db: Path, parquet: Path) -> list[tuple[str, float]]:
     return timings
 
 
-def build(out: Path = ROOT / "data") -> dict:
-    from oss import inventory
+def build(out: Path = ROOT / "data", hard: bool = True) -> dict:
+    """Dataset bawaan memakai mode sulit (alarm hilang, jam tidak sinkron, gangguan bersamaan): lebih mirip NMS nyata."""
+    import json
+
+    from oss import correlate, faults, inventory
     raw = out / "raw"
-    sizes = write_parquet(inventory.build(), raw)
+    inv = inventory.build()
+    gen = faults.generate(inv, hard=hard)
+    cor = correlate.correlate(gen["alarms"], inv)
+    ev = correlate.evaluate(gen["alarms"], gen["scenarios"], cor["incidents"])
+    inc_rows = [{k: v for k, v in i.items() if k != "alarm_ids"} for i in cor["incidents"]]
+    links = [{"incident_id": i["incident_id"], "alarm_id": a} for i in cor["incidents"] for a in i["alarm_ids"]]
+    scen = [{k: v for k, v in s.items()} for s in gen["scenarios"]]
+    tables = {**inv, "alarms": gen["alarms"], "scenarios": scen, "incidents": inc_rows, "incident_alarms": links}
+    sizes = write_parquet(tables, raw)
+    (out / "evaluation.json").write_text(json.dumps(ev, indent=2), encoding="utf-8")
     timings = run_models(out / "oss.duckdb", raw)
-    return {"raw": sizes, "models": timings}
+    return {"raw": sizes, "models": timings, "evaluation": ev}

@@ -13,8 +13,8 @@ Inventory & topology ──► Alarms / KPIs / config changes / orders ──►
 | # | Module | Status |
 |---|---|---|
 | 01 | Network inventory: sites, network elements, cells, transmission topology | ✅ v0.1 |
-| 02 | Fault management: alarm generator with labelled fault scenarios | planned |
-| 03 | Alarm correlation: topology- and time-based root cause, accuracy measured against the labels | planned |
+| 02 | Fault management: alarm catalog per vendor and a labelled fault-scenario generator | ✅ v0.2 |
+| 03 | Alarm correlation: topology- and time-based root cause, accuracy measured against the labels | ✅ v0.2 |
 | 04 | Performance management: KPIs that react to the injected faults | planned |
 | 05 | Network KPI: drill-down region ► site ► NE ► cell | planned |
 | 06 | Service impact: customer services mapped onto the network | planned |
@@ -41,11 +41,61 @@ microwave length of 7 km.
 Because the topology is a tree, `mart_site_path` (recursive SQL) gives every site's path to core and `mart_link_impact`
 the blast radius of every link: for example one PoP fiber carries 322 sites and 4,554 cells. Module 03 builds on this.
 
+## 02 Fault management
+
+Seven days of alarms from labelled scenarios on the same network: transmission cuts, power outages (often at relay sites,
+which also cut off the sites behind them), VSWR, sleeping cells, flapping microwave links, environment alarms and random
+noise. The network has two vendors, ZTE and Ericsson (EID), each with its own alarm names and severities.
+
+Alarm names follow naming found in **public references** (vendor alarm lists shared on document sites and telecom forums);
+where no public name was found, a generic name is used and marked `name_source = generic`. All events are synthetic.
+
+Every alarm carries the scenario it came from (`scenario_id`, `is_root`). The correlator never reads these columns; a test
+scrambles them and checks that the result is unchanged. They are only used to measure accuracy.
+
+## 03 Alarm correlation
+
+Topology and time, the way a NOC engineer reads an alarm storm:
+
+1. Merge repeats of the same alarm on the same object less than 15 minutes apart (flapping becomes one episode).
+2. A site is down if **any** evidence says so (NE unreachable, RAN out of service, cells down).
+3. Climb the transmission tree while the parent site is also down **and went down no later than the child** (4 minutes of
+   clock-skew tolerance). The topmost down site is where the fault is; the sites below it are victims.
+4. At the topmost site: a power alarm means **power**; a link alarm from the upstream end means **transport link**; neither
+   means transport link **inferred from topology**.
+5. Local alarms (VSWR with the cell degradation it causes, sleeping cells, environment) become their own incidents.
+
+### Accuracy
+
+Measured against the labels: a scenario counts as correct when most of its alarms land in one incident whose root type and
+root object match.
+
+| Scenario | Clean data | Hard data |
+|---|---|---|
+| Transmission cut | 40 / 40 | 40 / 40 |
+| Power outage | 30 / 30 | 29 / 30 |
+| Flapping link | 15 / 15 | 15 / 15 |
+| Two cuts in the same subtree minutes apart | n/a | **27 / 38** |
+| **All network faults** | **100%** | **90.2%** |
+
+*Hard data* imitates a real NMS: 30% of upstream link alarms and 30% of mains alarms missing, 10% of NE-unreachable alarms
+lost, up to ±3 minutes of clock skew per site, and 20 pairs of nested cuts a few minutes apart. On hard data 21,881 alarms
+become 2,000 incidents; for transmission cuts with a reported link alarm, about 215 alarms collapse into one incident.
+
+What the hard data found (both fixed, with regression tests):
+- Using only the NE-unreachable alarm as outage evidence broke the climb whenever that alarm was lost at a relay site:
+  12 of 40 cuts split into several incidents, and 85% were correct. Using any outage evidence brought it to 40 / 40.
+- Ignoring the order of events merged nested cuts: a parent that went down after its child cannot have caused the child's
+  outage. Requiring that order raised nested cuts from 47% to 71%.
+
+**Known limit:** two nested cuts a few minutes apart, with clock skew of the same size, remain ambiguous (27 / 38). Telling
+them apart needs more evidence than alarms alone, for example the timing of KPI drops (module 04).
+
 ## Run
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m oss build          # data/raw/*.parquet and data/oss.duckdb
+.venv/bin/python -m oss build          # data/raw/*.parquet, data/oss.duckdb, data/evaluation.json
 .venv/bin/pytest -q
 ```
 

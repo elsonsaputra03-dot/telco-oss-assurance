@@ -13,6 +13,10 @@ def main() -> int:
         print(f"raw/{k:18s} {v:>8,} baris")
     for k, t in res["models"]:
         print(f"{k:34s} {t * 1000:7.0f} ms")
+    ev = res["evaluation"]
+    print(f"korelasi: {ev['alarms']:,} alarm -> {ev['incidents']:,} insiden; akurasi akar masalah per skenario:")
+    for k, v in ev["per_type"].items():
+        print(f"  {k:15s} {v['correct']:4d}/{v['scenarios']:<4d} benar, {v['split']} terpecah, {v['merged']} tercampur")
     return 0
 
 
