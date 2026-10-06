@@ -15,8 +15,8 @@ Inventory & topology ──► Alarms / KPIs / config changes / orders ──►
 | 01 | Network inventory: sites, network elements, cells, transmission topology | ✅ v0.1 |
 | 02 | Fault management: alarm catalog per vendor and a labelled fault-scenario generator | ✅ v0.2 |
 | 03 | Alarm correlation: topology- and time-based root cause, accuracy measured against the labels | ✅ v0.2 |
-| 04 | Performance management: KPIs that react to the injected faults | planned |
-| 05 | Network KPI: drill-down region ► site ► NE ► cell | planned |
+| 04 | Performance management: PM counters per cell per hour, KPI-only detection (sleeping cells, congestion) | ✅ v0.3 |
+| 05 | Network KPI: drill-down network ► branch ► cluster ► site ► cell | ✅ v0.3 |
 | 06 | Service impact: customer services mapped onto the network | planned |
 | 07 | Provisioning **simulation**: order ► reserve ► configure ► validate ► activate | planned |
 | 08 | OSS data pipeline: Parquet ► DuckDB staging views ► mart tables | ✅ v0.1 |
@@ -90,6 +90,47 @@ What the hard data found (both fixed, with regression tests):
 
 **Known limit:** two nested cuts a few minutes apart, with clock skew of the same size, remain ambiguous (27 / 38). Telling
 them apart needs more evidence than alarms alone, for example the timing of KPI drops (module 04).
+
+## 04 Performance management
+
+PM counters per cell per hour for the same seven days: 30,435 cells × 168 hours = **5.1 million rows** (generated with numpy in
+about 2 seconds, 95 MB of Parquet). Like the files an OMC exports, these are counters, not finished KPIs: available seconds,
+downlink volume and active time, RRC attempts and successes, E-RAB releases and drops, latency, packets and losses, PRB
+utilisation, peak users.
+
+The counters come from the **true impact** of each fault, not from the alarms. So a site whose outage alarm was lost still
+shows zero availability, and a cell that stops carrying traffic without raising any alarm still shows up in its traffic.
+
+Network level over the week (hard data): availability 99.15%, user throughput 17 Mbps, accessibility 99%, drop rate 0.3%,
+latency 28 ms, packet loss 0.3%, about 4 PB of traffic (roughly 280 GB per site per day).
+
+### Detection from KPIs alone
+
+- **Sleeping cells**: available (≥ 3,500 of 3,600 seconds) but carrying less than 5% of that cell's normal traffic for the
+  same hour of day (7-day median), for at least 3 consecutive hours (gaps-and-islands in SQL). Each finding is labelled
+  `has_alarm` or silent. The hard data includes **30 sleeping cells that raise no alarm at all**.
+- **Congestion**: PRB utilisation above 85% for at least 3 hours in a day. About 7% of cells hit this at least once in the week.
+
+| Sleeping-cell detector (hard data) | Result |
+|---|---|
+| Precision (findings that are real sleeping cells) | 92 / 92 |
+| Recall (sleeping episodes of 4 hours or more) | 79 / 79 |
+| Silent sleeping cells found and labelled silent | **30 / 30** |
+
+What checking the first result found:
+- My evaluation first counted only sleeping episodes of 4+ hours as truth, so 13 correct findings of shorter episodes looked
+  like false positives (precision 86%). Precision is now measured against all real sleeping cells.
+- Two silent cells were labelled "has alarm" because a site-outage alarm on the same cell overlapped in time. An outage
+  alarm explains a cell that is unavailable, not an available cell with no traffic, so only sleeping, degradation and VSWR
+  alarms now count.
+- The first PRB scale marked 26% of cells as congested, far more than a real network; it was recalibrated to about 7%.
+
+## 05 Network KPI
+
+`mart_kpi_daily` holds every level in one table using `GROUPING SETS`: network, branch, cluster, site and cell, per day and
+technology (243,000 rows). Every KPI is a **ratio of sums** at its own level (for example availability = Σ available
+seconds ÷ Σ seconds), never an average of averages; a test recomputes a branch KPI from the raw counters and expects the
+same value.
 
 ## Run
 

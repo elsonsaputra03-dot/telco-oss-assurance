@@ -159,6 +159,8 @@ def evaluate(alarms: list[dict], scenarios: list[dict], incidents: list[dict]) -
         scen_type[a["alarm_id"]] = a["scenario_id"]
     for s in scenarios:
         ids = by_scen[s["scenario_id"]]
+        if not ids:                       # skenario tanpa alarm (sel tidur senyap) dinilai oleh detektor KPI, bukan di sini
+            continue
         incs = defaultdict(int)
         for i in ids:
             incs[inc_of[i]["incident_id"]] += 1

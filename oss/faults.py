@@ -68,6 +68,7 @@ class Gen:
             self.children.setdefault(l["a_end"], []).append(l["b_end"])
         self.alarms: list[dict] = []
         self.truth: list[dict] = []
+        self.impacts: list[dict] = []          # dampak SEBENARNYA (tidak ikut hilang saat alarm hilang): dasar KPI
         self.n = 0
 
     def downstream(self, site_id: str) -> list[str]:
@@ -90,8 +91,13 @@ class Gen:
                             "object": obj or ne_id, "raised_at": raised, "cleared_at": cleared,
                             "scenario_id": scen["scenario_id"], "scenario_type": scen["type"], "is_root": root})
 
+    def impact(self, level, obj, kind, t0, t1, scen):
+        self.impacts.append({"level": level, "object": obj, "kind": kind, "start": t0, "end": t1,
+                             "scenario_id": scen["scenario_id"], "scenario_type": scen["type"]})
+
     def site_down(self, sid, t0, t1, scen):
         """Semua yang terlihat OSS saat site terputus: NE tidak terjangkau, RAN out of service, sel mati."""
+        self.impact("site", sid, "outage", t0, t1, scen)
         j = lambda: timedelta(seconds=self.r.randint(5, 90))                    # noqa: E731
         k = lambda: timedelta(seconds=self.r.randint(10, 240))                  # noqa: E731
         self.alarm(sid, f"{sid}-CSR", "ne_down", t0 + j(), t1 + k(), scen)
@@ -135,6 +141,7 @@ class Gen:
         c = self.r.choice(self.cells[sid]); scen = self.scenario("vswr")
         t0 = self.t(); t1 = t0 + timedelta(hours=self.r.randint(2, 48))
         self.alarm(sid, c["ne_id"], "vswr", t0, t1, scen, root=True, obj=c["cell_id"])
+        self.impact("cell", c["cell_id"], "rf", t0, t1, scen)
         if self.r.random() < 0.7:
             self.alarm(sid, c["ne_id"], "cell_degrade", t0 + timedelta(minutes=self.r.randint(1, 15)), t1, scen, obj=c["cell_id"])
         scen.update(root_type="rf", root_object=c["cell_id"], start=t0, end=t1)
@@ -143,6 +150,15 @@ class Gen:
         sid = self.r.choice(list(self.cells)); c = self.r.choice(self.cells[sid]); scen = self.scenario("cell_sleeping")
         t0 = self.t(); t1 = t0 + timedelta(minutes=self.r.randint(15, 600))
         self.alarm(sid, c["ne_id"], "cell_sleep", t0, t1, scen, root=True, obj=c["cell_id"])
+        self.impact("cell", c["cell_id"], "sleeping", t0, t1, scen)
+        scen.update(root_type="cell", root_object=c["cell_id"], start=t0, end=t1)
+
+    def silent_sleeping(self):
+        """Sel 'tidur' TANPA alarm: tampak available, tetapi tidak membawa trafik. Hanya terlihat dari KPI (mode sulit)."""
+        sid = self.r.choice(list(self.cells)); c = self.r.choice([x for x in self.cells[sid] if x["tech"] == "4G"] or self.cells[sid])
+        scen = self.scenario("silent_sleeping")
+        t0 = self.t(); t1 = t0 + timedelta(hours=self.r.randint(4, 30))
+        self.impact("cell", c["cell_id"], "sleeping", t0, t1, scen)
         scen.update(root_type="cell", root_object=c["cell_id"], start=t0, end=t1)
 
     def link_flapping(self):
@@ -215,11 +231,13 @@ def generate(inv: dict | None = None, seed: int = 28092026, mix: dict | None = N
     if hard:
         for _ in range(20):
             concurrent_cut(g)
+        for _ in range(30):
+            g.silent_sleeping()
         degrade(g, random.Random(seed + 1))
-        live = {a["scenario_id"] for a in g.alarms}
+        live = {a["scenario_id"] for a in g.alarms} | {i["scenario_id"] for i in g.impacts if i["scenario_type"] == "silent_sleeping"}
         g.truth = [s for s in g.truth if s["scenario_id"] in live]
     g.alarms.sort(key=lambda a: (a["raised_at"], a["alarm_id"]))
     for a in g.alarms:
         if a["cleared_at"] <= a["raised_at"]:
             a["cleared_at"] = a["raised_at"] + timedelta(seconds=30)
-    return {"alarms": g.alarms, "scenarios": g.truth}
+    return {"alarms": g.alarms, "scenarios": g.truth, "impacts": g.impacts}
