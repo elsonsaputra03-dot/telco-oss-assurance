@@ -17,8 +17,8 @@ Inventory & topology ──► Alarms / KPIs / config changes / orders ──►
 | 03 | Alarm correlation: topology- and time-based root cause, accuracy measured against the labels | ✅ v0.2 |
 | 04 | Performance management: PM counters per cell per hour, KPI-only detection (sleeping cells, congestion) | ✅ v0.3 |
 | 05 | Network KPI: drill-down network ► branch ► cluster ► site ► cell | ✅ v0.3 |
-| 06 | Service impact: customer services mapped onto the network | planned |
-| 07 | Provisioning **simulation**: order ► reserve ► configure ► validate ► activate | planned |
+| 06 | Service impact: enterprise services on the network, downtime measured from KPIs, attributed to incidents, monthly SLA budget | ✅ v0.4 |
+| 07 | Provisioning **simulation**: order ► feasibility ► reserve ► configure ► validate ► activate, capacity-aware | ✅ v0.4 |
 | 08 | OSS data pipeline: Parquet ► DuckDB staging views ► mart tables | ✅ v0.1 |
 | 09 | Operational dashboard | planned |
 
@@ -131,6 +131,42 @@ What checking the first result found:
 technology (243,000 rows). Every KPI is a **ratio of sums** at its own level (for example availability = Σ available
 seconds ÷ Σ seconds), never an average of averages; a test recomputes a branch KPI from the raw counters and expects the
 same value.
+
+## 06 Service impact
+
+739 synthetic enterprise services (Enterprise Internet, IP VPN, Dedicated Backhaul; Gold 99.9%, Silver 99.5%, Bronze 99.0%)
+ride on cell-site routers, so each service follows its site's transmission path to core.
+
+- **Downtime is measured, not assumed**: per service, the unavailable seconds of its site in the hourly KPI counters
+  (module 04). A test recomputes one service's downtime from the raw counters and expects the same value.
+- **Attributed to correlated incidents** (module 03): an outage hour is linked to the network incident that covers the
+  site at that time. Over 99.9% of service downtime is attributed; the rest stays visible as `unattributed_min`.
+- **Incidents ranked by customer impact**, not by alarm count: service-minutes down, weighted 3/2/1 for Gold/Silver/Bronze.
+  The top incident is a microwave link cut affecting 34 services, 6 of them Gold.
+- **SLA against the monthly budget** (30 days: Gold 43 min, Silver 216 min, Bronze 432 min), because seven days of data
+  cannot judge a monthly SLA. The first version judged 99.9% over a 7-day window, a 10-minute allowance, so almost every
+  touched service "breached". Now `budget_used_pct` shows how much of the month this week consumed, and `sla_breached`
+  means this week alone exceeded the month.
+
+Result on the hard data: 51 of 146 Gold services were hit and **all 51** used up their monthly budget in this week, while
+3 of 71 hit Bronze services did. Transmission outages last 20 minutes to 6 hours and every service has a single path, so
+99.9% is not reachable without path redundancy, which is the design conclusion a real network would draw too.
+
+## 07 Provisioning (simulation)
+
+A **simulated** workflow, not a copy of any operator's provisioning system. 500 orders arrive over the week:
+`RECEIVED ► FEASIBILITY_OK | REJECTED ► RESOURCE_RESERVED ► CONFIG_SENT ► VALIDATED ► ACTIVATED`, with up to three
+validation attempts (config timeout, or the site being down at that moment per the true fault impacts) before the
+reservation is released.
+
+Feasibility checks **every link on the path to core**: link load = peak cellular backhaul of all sites behind it (from the
+KPI counters) plus active enterprise services. Links are dimensioned to the smallest standard capacity at least 2.5x their
+peak backhaul; 3% are deliberately tight (1.1x), like links waiting for an upgrade. A rejected order names the bottleneck
+link, and `mart_capacity_bottlenecks` lists the links that rejected the most orders, i.e. upgrade candidates.
+
+Calibration: 1.6x with 10% tight links rejected 49% of orders, because the average path has about 8 links and almost always
+crosses a tight one; 2.5x with 3% rejects 22% (111 of 500). Tests check that no link is ever above capacity and that every
+rejection names a link on that site's path.
 
 ## Run
 

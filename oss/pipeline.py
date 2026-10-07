@@ -56,6 +56,9 @@ def build(out: Path = ROOT / "data", hard: bool = True) -> dict:
     kpi = performance.generate(inv, gen["impacts"])
     pq.write_table(kpi, raw / "kpi_hourly.parquet", compression="zstd")
     sizes["kpi_hourly"] = kpi.num_rows
+    from oss import services
+    svc = services.build(inv, gen["impacts"], services.backhaul_peak_mbps(kpi, inv))
+    sizes.update(write_parquet(svc, raw))
     timings = run_models(out / "oss.duckdb", raw)
     ev["kpi_detection"] = evaluate_kpi(out / "oss.duckdb", gen["impacts"])
     (out / "evaluation.json").write_text(json.dumps(ev, indent=2, default=str), encoding="utf-8")
