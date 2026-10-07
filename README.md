@@ -20,7 +20,7 @@ Inventory & topology ──► Alarms / KPIs / config changes / orders ──►
 | 06 | Service impact: enterprise services on the network, downtime measured from KPIs, attributed to incidents, monthly SLA budget | ✅ v0.4 |
 | 07 | Provisioning **simulation**: order ► feasibility ► reserve ► configure ► validate ► activate, capacity-aware | ✅ v0.4 |
 | 08 | OSS data pipeline: Parquet ► DuckDB staging views ► mart tables | ✅ v0.1 |
-| 09 | Operational dashboard | planned |
+| 09 | Operational dashboard: [live page](https://elsonsaputra03-dot.github.io/indo-realtime-monitor/oss.html) built from `published/dashboard.json` | ✅ v0.5 |
 
 ## 01 Inventory and transmission topology
 
@@ -168,11 +168,20 @@ Calibration: 1.6x with 10% tight links rejected 49% of orders, because the avera
 crosses a tight one; 2.5x with 3% rejects 22% (111 of 500). Tests check that no link is ever above capacity and that every
 rejection names a link on that site's path.
 
+## 09 Operational dashboard
+
+[**OSS dashboard**](https://elsonsaputra03-dot.github.io/indo-realtime-monitor/oss.html) on my portfolio. `python -m oss export` writes a
+small summary of the marts (about 125 KB, not the 5 million counter rows) to `published/dashboard.json`, and the static page reads it from this
+repository. It shows the alarm-to-incident funnel and accuracy per scenario, the 15 incidents with the most customer impact (each with its
+correlation tree and its sites on a map), network KPIs per day and per branch, the silent sleeping cells, SLA by tier and the provisioning
+funnel with the links that rejected the most orders.
+
 ## Run
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m oss build          # data/raw/*.parquet, data/oss.duckdb, data/evaluation.json
+.venv/bin/python -m oss export         # published/dashboard.json for the dashboard page
 .venv/bin/pytest -q
 ```
 

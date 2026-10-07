@@ -1,10 +1,16 @@
-"""python -m oss build   -> bangun ulang data sintetis, Parquet, dan model DuckDB di data/"""
+"""python -m oss build    -> bangun ulang data sintetis, Parquet, dan model DuckDB di data/
+python -m oss export   -> tulis published/dashboard.json untuk halaman dashboard (jalankan setelah build)"""
 import sys
 
 from oss import pipeline
 
 
 def main() -> int:
+    if len(sys.argv) >= 2 and sys.argv[1] == "export":
+        from oss import export
+        res = export.export()
+        print(f"{res['file']}: {res['bytes'] / 1024:.0f} KB")
+        return 0
     if len(sys.argv) < 2 or sys.argv[1] != "build":
         print(__doc__)
         return 2
